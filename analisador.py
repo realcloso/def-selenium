@@ -13,29 +13,22 @@ class AnalisadorProdutos:
             return []
 
         df = pd.DataFrame([p.__dict__ for p in self.produtos])
-        df['nome_normalized'] = df['nome'].str.lower().str.strip()  # For better grouping
+        df['nome_normalized'] = df['nome'].str.lower().str.strip()
 
-        # Frequência de aparição do produto nos resultados
-        frequencia = df.groupby('nome_normalized').size().reset_index(name='frequencia')
-        df = df.merge(frequencia, on='nome_normalized')
-
-        # Normalização dos dados para cálculo do score
-        max_freq = df['frequencia'].max() if not df['frequencia'].empty else 1
+        max_relev = df['relevancia'].max() if not df['relevancia'].empty else 1
         min_price, max_price = df['preco'].min(), df['preco'].max()
         price_range = max_price - min_price if max_price > min_price else 1
         
-        df['score'] = (0.5 * df['frequencia'] / max_freq) + \
-                      (0.3 * (1 - (df['preco'] - min_price) / price_range)) + \
-                      (0.2 * df['avaliacao'] / 5.0) # Assume avaliação máxima de 5.0
+        df['score'] = (0.5 * df['relevancia'] / max_relev) + \
+                    (0.3 * (1 - (df['preco'] - min_price) / price_range)) + \
+                    (0.2 * df['avaliacao'] / 5.0)
 
-        # Atribuir o score calculado de volta aos objetos Produto
         score_map = df.set_index('nome_normalized')['score'].to_dict()
         for p in self.produtos:
             normalized_name = p.nome.lower().strip()
             if normalized_name in score_map:
                 p.ranking = score_map[normalized_name]
         
-        # Filtrar duplicatas e ordenar, mantendo o produto com o maior ranking
         unique_products = {p.nome.lower().strip(): p for p in self.produtos}
         return sorted(list(unique_products.values()), key=lambda p: p.ranking or 0, reverse=True)
 
@@ -57,10 +50,12 @@ class AnalisadorProdutos:
                 'Link': p.link,
                 'Filtros_Pesquisados': ", ".join(p.filtros_pesquisados)
             }
-            # Add details as columns
-            for group, details in p.detalhes.items():
-                for key, value in details.items():
-                    row[f'{group} - {key}'] = value
+            for group, sub_details in p.detalhes.items():
+                if isinstance(sub_details, dict):
+                    for key, value in sub_details.items():
+                        row[f'{group} - {key}'] = value
+                else:
+                    row[group] = sub_details
             data_for_csv.append(row)
 
         df = pd.DataFrame(data_for_csv)

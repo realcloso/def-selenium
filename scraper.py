@@ -95,6 +95,10 @@ class ZoomScraper:
 
     def _merge_products(self, existing: List[Produto], new: List[Produto]):
         for p_new in new:
+            # Adicionar esta linha de validação
+            if "notebook" not in p_new.nome.lower():
+                continue # Pula produtos que não contém a palavra "notebook" no nome
+            
             found = False
             for p_existing in existing:
                 if p_existing.nome.lower().strip() == p_new.nome.lower().strip():
@@ -170,52 +174,25 @@ class ZoomScraper:
     def get_product_details_batch(self, products: List[Produto]) -> None:
         logging.info("Starting batch collection of product details...")
         for product in products:
-            # Chama o método refatorado para coletar detalhes
             self._get_product_details_safe(product)
             time.sleep(random.uniform(1, 2))
 
     def _get_product_details_safe(self, product: Produto):
-        """
-        Tenta coletar detalhes de um único produto, lidando com erros de timeout.
-        
-        Melhoria 1: Adota uma estratégia de seleção de elementos mais robusta,
-        tentando múltiplos seletores caso o principal falhe.
-        Melhoria 2: Garante que a exceção de timeout não pare a execução do loop
-        principal de coleta, apenas atribui um valor de erro ao produto.
-        """
         try:
             logging.info(f"Fetching details for product: {product.nome}")
             self.driver.get(product.link)
-            wait_for_details = WebDriverWait(self.driver, WAIT_TIMEOUT)
+            WebDriverWait(self.driver, WAIT_TIMEOUT).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
+            time.sleep(random.uniform(5, 10))  # Increased sleep for slow loads
             
-            # Lista de seletores em ordem de preferência. O primeiro que for encontrado, será usado.
-            detail_selectors = [
-                (By.CSS_SELECTOR, "section#technicalSpecifications"),
-                (By.CSS_SELECTOR, "div[data-testid='spec-container']")
-            ]
-            
-            details_found = False
-            for selector_type, selector_value in detail_selectors:
-                try:
-                    wait_for_details.until(EC.presence_of_element_located((selector_type, selector_value)))
-                    details_found = True
-                    break  # Sai do loop assim que encontrar um seletor válido
-                except TimeoutException:
-                    logging.warning(f"Selector '{selector_value}' not found for {product.nome}. Trying next selector.")
-            
-            if not details_found:
-                raise TimeoutException("No valid detail selectors found for the product page.")
-
             product.detalhes = self.collectors.get_product_details(self.driver.page_source)
+            
             logging.info(f"Details fetched successfully for {product.nome}.")
-
         except TimeoutException as e:
-            logging.error(f"Timeout while getting details for {product.nome}. The page took too long to load: {e}")
-            product.detalhes = {"Error": "Timeout while loading details."}
+            logging.error(f"Timeout while getting details for {product.nome}: {e}")
+            product.detalhes = {"Detalhes": {"Erro": "Timeout ao carregar os detalhes."}}
         except Exception as e:
-            logging.error(f"An unexpected error occurred while getting details for {product.nome}: {e}", exc_info=True)
-            product.detalhes = {"Error": "Unexpected error."}
-
+            logging.error(f"Unexpected error for {product.nome}: {e}", exc_info=True)
+            product.detalhes = {"Detalhes": {"Erro": f"Ocorreu um erro inesperado: {str(e)}"}}
 
     def close(self):
         logging.info("Closing the WebDriver.")

@@ -1,6 +1,6 @@
 # collectors.py
 import logging
-from typing import List, Dict
+from typing import List, Dict, Union
 from bs4 import BeautifulSoup
 
 from produto import Produto
@@ -65,17 +65,33 @@ class ProductCollectors:
         logging.info(f"Página analisada. {len(products)} produtos extraídos para o filtro '{filtro}'.")
         return products
 
-    def get_product_details(self, page_source: str) -> Dict[str, str]:
+    def get_product_details(self, page_source: str) -> dict:
         soup = BeautifulSoup(page_source, 'html.parser')
         details = {}
 
+        # Nova tentativa de encontrar a tabela de especificações
+        spec_table = soup.find('table', class_='spec-table') 
+        if spec_table:
+            for row in spec_table.find_all('tr'):
+                cols = row.find_all('td')
+                if len(cols) == 2:
+                    category = row.find_previous('h3').get_text(strip=True) if row.find_previous('h3') else "Geral"
+                    key = cols[0].get_text(strip=True)
+                    value = cols[1].get_text(strip=True)
+                    
+                    if category not in details:
+                        details[category] = {}
+                    details[category][key] = value
+            if details:
+                return details
+
+        # Manter os seletores originais como fallback caso o novo não funcione
         spec_container_new = soup.select_one("section#technicalSpecifications")
         if spec_container_new:
             for group in spec_container_new.find_all("div", recursive=False):
                 title_elem = group.find("h3")
                 title = title_elem.get_text(strip=True) if title_elem else "Detalhes Gerais"
                 details[title] = {}
-
                 for row in group.find_all("tr"):
                     cols = row.find_all(["td", "th"])
                     if len(cols) >= 2:
@@ -102,5 +118,5 @@ class ProductCollectors:
             if details:
                 return details
 
-        logging.warning("Nenhum container de especificações encontrado.")
-        return {"Fallback": {"Error": "No specs found"}}
+        logging.warning("Nenhum container de especificações encontrado. Retornando fallback.")
+        return {"Detalhes": {"Erro": "Nenhum dado técnico encontrado."}}
