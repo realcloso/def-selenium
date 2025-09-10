@@ -36,7 +36,6 @@ class ZoomScraper:
     def _retry_get_page_source(self) -> Optional[str]:
         for attempt in range(RETRY_ATTEMPTS):
             try:
-                # wait for the product container to be present in the DOM and visible on the page
                 self.wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, SELECTORS['PRODUCT_CARD_CONTAINER'])))
                 logging.info(f"Products loaded. Attempt {attempt+1}/{RETRY_ATTEMPTS}.")
                 return self.driver.page_source
@@ -47,7 +46,6 @@ class ZoomScraper:
 
     def search_and_collect(self, query: str, filters: List[str], pages_to_scrape: int = 3) -> List[Produto]:
         all_products = []
-        # Adiciona 'Sem filtro' ao início da lista de filtros para garantir a coleta inicial
         full_filter_list = ["Sem filtro"] + filters
         
         try:
@@ -59,19 +57,14 @@ class ZoomScraper:
             search_box.send_keys(query)
             search_box.submit()
             
-            # --- MODIFICATION START ---
-            # Instead of waiting for URL to change, we wait for a specific element on the search results page.
-            # This is more reliable as page content is a better indicator of successful navigation than the URL itself.
             self.wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, SELECTORS['PRODUCT_CARD_CONTAINER'])))
             logging.info("Successfully navigated to search results page.")
             search_url = self.driver.current_url
             time.sleep(random.uniform(3, 5))
-            # --- MODIFICATION END ---
 
             for filter_name in full_filter_list:
                 logging.info(f"Starting collection with filter: '{filter_name}'...")
                 
-                # Resets to the initial search results page before applying each filter
                 self.driver.get(search_url)
                 time.sleep(random.uniform(5, 7))
 
@@ -126,7 +119,6 @@ class ZoomScraper:
 
             sel = SeleniumSelect(select_elem)
 
-            # mapeamento: nome usado no main.py -> value do <option> no HTML
             mapping = {
                 "Mais Relevantes": "lowering_percentage_desc",
                 "Mais relevante": "lowering_percentage_desc",
@@ -143,14 +135,12 @@ class ZoomScraper:
             if value:
                 sel.select_by_value(value)
             else:
-                # tentativa fallback por texto visível (caso nomes sejam diferentes)
                 try:
                     sel.select_by_visible_text(filter_name)
                 except Exception:
                     logging.warning(f"No mapping or visible option text for filter '{filter_name}'.")
                     return False
 
-            # Dispara o evento change para garantir que o JS do site atualize o conteúdo
             self.driver.execute_script(
                 "arguments[0].dispatchEvent(new Event('change', {bubbles: true}));",
                 select_elem
@@ -180,19 +170,52 @@ class ZoomScraper:
     def get_product_details_batch(self, products: List[Produto]) -> None:
         logging.info("Starting batch collection of product details...")
         for product in products:
-            try:
-                self.get_product_details(product)
-                time.sleep(random.uniform(1, 2))
-            except Exception as e:
-                logging.error(f"An error occurred while getting details for {product.nome}: {e}")
+            # Chama o método refatorado para coletar detalhes
+            self._get_product_details_safe(product)
+            time.sleep(random.uniform(1, 2))
 
-    def get_product_details(self, product: Produto):
-        logging.info(f"Fetching details for product: {product.nome}")
-        self.driver.get(product.link)
-        wait_for_details = WebDriverWait(self.driver, WAIT_TIMEOUT)
-        wait_for_details.until(EC.presence_of_element_located((By.CSS_SELECTOR, SELECTORS['SPEC_CONTAINER'])))
-        product.detalhes = self.collectors.get_product_details(self.driver.page_source)
-        logging.info(f"Details fetched successfully for {product.nome}.")
+    def _get_product_details_safe(self, product: Produto):
+        """
+        Tenta coletar detalhes de um único produto, lidando com erros de timeout.
+        
+        Melhoria 1: Adota uma estratégia de seleção de elementos mais robusta,
+        tentando múltiplos seletores caso o principal falhe.
+        Melhoria 2: Garante que a exceção de timeout não pare a execução do loop
+        principal de coleta, apenas atribui um valor de erro ao produto.
+        """
+        try:
+            logging.info(f"Fetching details for product: {product.nome}")
+            self.driver.get(product.link)
+            wait_for_details = WebDriverWait(self.driver, WAIT_TIMEOUT)
+            
+            # Lista de seletores em ordem de preferência. O primeiro que for encontrado, será usado.
+            detail_selectors = [
+                (By.CSS_SELECTOR, "section#technicalSpecifications"),
+                (By.CSS_SELECTOR, "div[data-testid='spec-container']")
+            ]
+            
+            details_found = False
+            for selector_type, selector_value in detail_selectors:
+                try:
+                    wait_for_details.until(EC.presence_of_element_located((selector_type, selector_value)))
+                    details_found = True
+                    break  # Sai do loop assim que encontrar um seletor válido
+                except TimeoutException:
+                    logging.warning(f"Selector '{selector_value}' not found for {product.nome}. Trying next selector.")
+            
+            if not details_found:
+                raise TimeoutException("No valid detail selectors found for the product page.")
+
+            product.detalhes = self.collectors.get_product_details(self.driver.page_source)
+            logging.info(f"Details fetched successfully for {product.nome}.")
+
+        except TimeoutException as e:
+            logging.error(f"Timeout while getting details for {product.nome}. The page took too long to load: {e}")
+            product.detalhes = {"Error": "Timeout while loading details."}
+        except Exception as e:
+            logging.error(f"An unexpected error occurred while getting details for {product.nome}: {e}", exc_info=True)
+            product.detalhes = {"Error": "Unexpected error."}
+
 
     def close(self):
         logging.info("Closing the WebDriver.")

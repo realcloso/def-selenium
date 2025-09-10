@@ -1,0 +1,3 @@
+./__pycache__
+./venv
+venv/lib/python3.12/site-packages/bs4/__pycache__/*

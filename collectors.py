@@ -39,7 +39,7 @@ class ProductCollectors:
                 price_text = price_elem.text.replace("R$", "").replace(".", "").replace(",", ".").strip()
                 price = float(price_text)
 
-                if not 0 < price < 10000:
+                if not 0 < price < 100000:
                     logging.warning(f"Invalid price {price} for {name}, skipping.")
                     continue
 
